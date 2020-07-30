@@ -1,24 +1,23 @@
 import os
 import argparse
+import model
+import datetime
 
 import tensorflow as tf
+import numpy as np
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 
 
-def readdecode(filename, width):
-    """
-    Can only read JPEG type of file
-    """
+def readdecode(filename, attr, width):
     raw = tf.io.read_file(filename)
 
     image = tf.image.decode_jpeg(raw, channels=3)
     image = tf.image.convert_image_dtype(image, tf.float32)
     image = tf.image.resize(image, (width, width))
-    # image = tf.image.random_crop(image, [WIDTH, WIDTH, 3])
     image = image * 2 - 1
 
-    return image
+    return image, attr
 
 
 def textparser(text):
@@ -27,8 +26,9 @@ def textparser(text):
     new_strings = tf.boolean_mask(strings, mask)
 
     link = strings[0]
+    attr = [0.0, 1.0] if new_strings[-20] == '-1' else [1.0, 0.0]
 
-    return link, new_strings[-20]
+    return link, attr
 
 
 def create_dataset_celb(dir, width):
@@ -37,28 +37,67 @@ def create_dataset_celb(dir, width):
     textfile = tf.data.TextLineDataset(filepath)
     textfile = textfile.map(textparser)
 
-    fmale = textfile.filter(lambda _, gender: gender == '-1')
-    male = textfile.filter(lambda _, gender: gender == '1')
-
     adddir = lambda x, y: (dir + 'img_align_celeba/' + x, y)
+    link2image = lambda link, attr: readdecode(link, attr, width)
 
-    fmale = fmale.map(adddir, AUTOTUNE)
-    male = male.map(adddir, AUTOTUNE)
+    ds = textfile.map(adddir)
+    ds = ds.map(link2image)
 
-    link2image = lambda link, gender: readdecode(link, width)
+    return ds
 
-    fmale = fmale.map(link2image, AUTOTUNE)
-    male = male.map(link2image, AUTOTUNE)
 
-    return fmale, male
+def label2onehot(label):
+    arr = np.zeros([1, 128, 128, 2])
+
+    arr[:, :, :, 0] = label[0]
+    arr[:, :, :, 1] = label[1]
+
+    return arr
+
 
 def train(args):
-    
+    dataset = create_dataset_celb(args.dir, 128)
+    batch_ds = dataset.shuffle(10000).batch(15)
+
+    suffix = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+    filename = os.path.join('logdir', suffix, 'train')
+    summarywriter = tf.summary.create_file_writer(filename)
+
+    stargan = model.Stargan(summarywriter, 128, 2)
+    ckpt = tf.train.Checkpoint(
+        generator=stargan.generator,
+        discrimintor=stargan.discriminator,
+        genopti=stargan.genopti,
+        disopti=stargan.disopti
+    )
+
+    ckptm = tf.train.CheckpointManager(ckpt, 'checkpoint', 10)
+    if ckptm.latest_checkpoint:
+        print(f'Loaded checkpoint: {ckptm.latest_checkpoint}')
+    ckptm.restore_or_initialize()
+
+    step = 0
+    for it in range(args.iters):
+        for img, label in batch_ds:
+            step += 1
+            stargan.train_step(img, label, tf.constant(step, tf.int64))
+
+        for img in dataset.take(1):
+            label = label2onehot([0, 1])
+            infered = stargan.generator([tf.expand_dims(img[0], 0), label])
+
+            with summarywriter.as_default():
+                tf.summary.image('image', infered, step)
+
+        if it % 5 == 0:
+            ckptm.save(it)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument('--dir', help='directory of the celeba',
+                        required=True)
+    parser.add_argument('--iters', help='number of iterations',
+                        default=20)
 
-    train(args)
-    
-    
+    train(parser.parse_args())
