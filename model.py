@@ -1,10 +1,17 @@
 import tensorflow as tf
-from tensorflow.python.keras.regularizers import l1_l2
-from tensorflow.python.ops.gen_nn_ops import l2_loss
-from tensorflow.python.ops.math_ops import reduce_mean
-# import scheduler
 import tensorflow_addons as tfa
-# from tensorflow_examples.models.pix2pix import pix2pix
+
+
+@tf.function
+def one2hot(attr):
+    attr = tf.cast(attr, dtype=tf.float32)
+    cube = tf.TensorArray(tf.float32, 2, dynamic_size=True)
+
+    for i in tf.range(0, 2):
+        filler = tf.fill([128, 128], attr[i])
+        cube.write(i, filler)
+
+    return tf.transpose(cube.stack(), [1, 2, 0])
 
 
 def resi_block(input_layer, k):
@@ -130,14 +137,6 @@ def discriminator(width, nlabel):
     return tf.keras.Model(inputs=[input_layer], outputs=[src_output, cls_output])
 
 
-def label2onehot(label, width, nlabels):
-    batch_size = label.shape[0]
-
-    indices = tf.constant(label)
-    shape = tf.constant([batch_size, width, width, nlabels])
-    onehot = tf.scatter_nd()
-
-
 def adverserial_loss(domain, target):
     adv_1 = tf.reduce_mean(tf.math.log(tf.sigmoid(domain)))
     adv_2 = tf.reduce_mean(tf.math.log(1 - tf.sigmoid(target)))
@@ -164,36 +163,21 @@ class Stargan:
         self.lambda_rec = lambda_rec
         self.lambda_gp = lambda_gp
 
-    @tf.function
+    @ tf.function
     def train_step(self, domimg, domcond, step):
         batch_size = domimg.shape[0]
 
-        random = tf.random.uniform([batch_size], maxval=2, dtype=tf.int32)
-        tarcond = tf.one_hot(random, 2)
+        tarcond = tf.random.uniform(
+            [batch_size, 2], maxval=2, dtype=tf.int32)
 
-        targetcond = tf.TensorArray(tf.float32, batch_size, dynamic_size=True)
-        domaincond = tf.TensorArray(tf.float32, batch_size, dynamic_size=True)
-
-        # Convert label into onehot
-        for i in tf.range(0, batch_size):
-            mask1 = tarcond[i, 0]
-            mask2 = tarcond[i, 1]
-            mask11 = domcond[i, 0]
-            mask22 = domcond[i, 1]
-
-            tarcombined = tf.concat([tf.fill((self.width, self.width, 1), mask1),
-                                     tf.fill((self.width, self.width, 1), mask2)], -1)
-            srccombined = tf.concat([tf.fill((self.width, self.width, 1), mask11),
-                                     tf.fill((self.width, self.width, 1), mask22)], -1)
-
-            targetcond.write(i, tarcombined)
-            domaincond.write(i, srccombined)
+        targetcond = tf.map_fn(one2hot, elems=tarcond, dtype=tf.float32)
+        domaincond = tf.map_fn(one2hot, elems=domcond, dtype=tf.float32)
 
         with tf.GradientTape(persistent=True) as tape:
             domresc, domcls = self.discriminator(domimg)
             classreal = self.binloss(domcond, tf.reshape(domcls,
                                                          (batch_size, self.nlabel)))
-            faketarimg = self.generator([domimg, targetcond.stack()])
+            faketarimg = self.generator([domimg, targetcond])
             tarresc, tarcls = self.discriminator(faketarimg)
 
             real = -tf.reduce_mean(domresc)
@@ -227,8 +211,8 @@ class Stargan:
 
         if step % 5 == 0:
             with tf.GradientTape() as tape:
-                faketarimg = self.generator([domimg, targetcond.stack()])
-                fakedomimg = self.generator([faketarimg, domaincond.stack()])
+                faketarimg = self.generator([domimg, targetcond])
+                fakedomimg = self.generator([faketarimg, domaincond])
                 tarresc, tarcls = self.discriminator(faketarimg)
 
                 lossadv = -tf.reduce_mean(tarresc)

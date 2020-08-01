@@ -17,6 +17,8 @@ def readdecode(filename, attr, width):
     image = tf.image.resize(image, (width, width))
     image = image * 2 - 1
 
+    attr = [0.0, 1.0] if attr == b'1' else [0.0, 1.0]
+
     return image, attr
 
 
@@ -26,9 +28,8 @@ def textparser(text):
     new_strings = tf.boolean_mask(strings, mask)
 
     link = strings[0]
-    attr = [0.0, 1.0] if new_strings[-20] == '-1' else [1.0, 0.0]
 
-    return link, attr
+    return link, new_strings[-20]
 
 
 def create_dataset_celb(dir, width):
@@ -46,7 +47,7 @@ def create_dataset_celb(dir, width):
     return ds
 
 
-def label2onehot(label):
+def label2onehot_C(label):
     arr = np.zeros([1, 128, 128, 2])
 
     arr[:, :, :, 0] = label[0]
@@ -57,7 +58,7 @@ def label2onehot(label):
 
 def train(args):
     dataset = create_dataset_celb(args.dir, 128)
-    batch_ds = dataset.shuffle(10000).batch(15)
+    batch_ds = dataset.take(10000).shuffle(10000).batch(5)
 
     suffix = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
     filename = os.path.join('logdir', suffix, 'train')
@@ -83,7 +84,7 @@ def train(args):
             stargan.train_step(img, label, tf.constant(step, tf.int64))
 
         for img in dataset.take(1):
-            label = label2onehot([0, 1])
+            label = label2onehot_C([0, 1])
             infered = stargan.generator([tf.expand_dims(img[0], 0), label])
 
             with summarywriter.as_default():
