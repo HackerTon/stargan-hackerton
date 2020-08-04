@@ -1,20 +1,24 @@
-import os
 import argparse
-import model
 import datetime
+import os
+import time
 
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
+
+import model
+from model import one2hot
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 
 
-def readdecode(filename, attr, width):
+def readdecode(filename, attr):
     raw = tf.io.read_file(filename)
 
     image = tf.image.decode_jpeg(raw, channels=3)
     image = tf.image.convert_image_dtype(image, tf.float32)
-    image = tf.image.resize(image, (width, width))
+    image = image[20:-20, :]
+    image = tf.image.resize(image, (128, 128))
     image = image * 2 - 1
 
     attr = [0.0, 1.0] if attr == b'1' else [0.0, 1.0]
@@ -32,33 +36,34 @@ def textparser(text):
     return link, new_strings[-20]
 
 
-def create_dataset_celb(dir, width):
+def create_dataset_celb(dir):
     filepath = os.path.join(dir, 'list_attr_celeba.txt')
+    imgdir = os.path.join(dir, 'img_align_celeba')
 
     textfile = tf.data.TextLineDataset(filepath)
-    textfile = textfile.map(textparser)
+    textfile = textfile.map(textparser, AUTOTUNE)
 
-    adddir = lambda x, y: (dir + 'img_align_celeba/' + x, y)
-    link2image = lambda link, attr: readdecode(link, attr, width)
+    adddir = lambda x, y: (imgdir + '/' + x, y)
+    link2image = lambda link, attr: readdecode(link, attr)
 
-    ds = textfile.map(adddir)
-    ds = ds.map(link2image)
+    ds = textfile.map(adddir, AUTOTUNE)
+    ds = ds.map(link2image, AUTOTUNE)
 
     return ds
 
 
 def label2onehot_C(label):
-    arr = np.zeros([1, 128, 128, 2])
+    arr = np.zeros([128, 128, 2])
 
-    arr[:, :, :, 0] = label[0]
-    arr[:, :, :, 1] = label[1]
+    arr[:, :, 0] = label[0]
+    arr[:, :, 1] = label[1]
 
     return arr
 
 
 def train(args):
-    dataset = create_dataset_celb(args.dir, 128)
-    batch_ds = dataset.take(10000).shuffle(10000).batch(5)
+    dataset = create_dataset_celb(args.dir)
+    batch_ds = dataset.shuffle(10000).batch(5)
 
     suffix = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
     filename = os.path.join('logdir', suffix, 'train')
@@ -79,18 +84,27 @@ def train(args):
 
     step = 0
     for it in range(args.iters):
+        initial = time.time()
+
         for img, label in batch_ds:
             step += 1
             stargan.train_step(img, label, tf.constant(step, tf.int64))
 
-        for img in dataset.take(1):
-            label = label2onehot_C([0, 1])
-            infered = stargan.generator([tf.expand_dims(img[0], 0), label])
+        for img, label in dataset.take(1):
+            label = label2onehot_C(tf.reverse(label, [0]))
+
+            infered = stargan.generator(
+                [tf.expand_dims(img, 0),
+                 tf.expand_dims(label, 0)])
 
             with summarywriter.as_default():
                 tf.summary.image('image', infered, step)
 
-        if it % 5 == 0:
+        timetaken = time.time() - initial
+
+        print(f'Timetaken per epoch: {round(timetaken, 5)}')
+
+        if it % 1 == 0:
             ckptm.save(it)
 
 

@@ -33,7 +33,7 @@ def resi_block(input_layer, k):
     d2_block = tfa.layers.InstanceNormalization()(d_block)
     d2_block = tf.keras.layers.Activation('relu')(d2_block)
 
-    output = tf.keras.layers.Concatenate()([d2_block, input_layer])
+    output = tf.keras.layers.Add()([d2_block, input_layer])
 
     return output
 
@@ -159,9 +159,9 @@ class Stargan:
         self.binloss = tf.keras.losses.BinaryCrossentropy(from_logits=True)
         self.nlabel = nlabel
 
-        self.lambda_cls = lambda_cls
-        self.lambda_rec = lambda_rec
-        self.lambda_gp = lambda_gp
+        self.lambda_cls = float(lambda_cls)
+        self.lambda_rec = float(lambda_rec)
+        self.lambda_gp = float(lambda_gp)
 
     @ tf.function
     def train_step(self, domimg, domcond, step):
