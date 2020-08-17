@@ -23,7 +23,7 @@ def resi_block(input_layer, k):
         kernel_initializer=kernel_initializer,
         use_bias=False)(input_layer)
     d_block = tfa.layers.InstanceNormalization()(d_block)
-    d_block = tf.keras.layers.Activation('relu')(d_block)
+    d_block = tf.keras.layers.LeakyReLU()(d_block)
 
     # second block
     d2_block = tf.keras.layers.Conv2D(
@@ -31,7 +31,7 @@ def resi_block(input_layer, k):
         kernel_initializer=kernel_initializer,
         use_bias=False)(d_block)
     d2_block = tfa.layers.InstanceNormalization()(d_block)
-    d2_block = tf.keras.layers.Activation('relu')(d2_block)
+    d2_block = tf.keras.layers.LeakyReLU()(d2_block)
 
     output = tf.keras.layers.Add()([d2_block, input_layer])
 
@@ -52,7 +52,7 @@ def generator(nlabel):
         kernel_initializer=kernel_initializer,
         use_bias=False)(combined_input)
     conv1 = tfa.layers.InstanceNormalization()(conv1)
-    conv1 = tf.keras.layers.Activation('relu')(conv1)
+    conv1 = tf.keras.layers.LeakyReLU()(conv1)
 
     # d128
     conv2 = tf.keras.layers.Conv2D(
@@ -60,7 +60,7 @@ def generator(nlabel):
         kernel_initializer=kernel_initializer,
         use_bias=False)(conv1)
     conv2 = tfa.layers.InstanceNormalization()(conv2)
-    conv2 = tf.keras.layers.Activation('relu')(conv2)
+    conv2 = tf.keras.layers.LeakyReLU()(conv2)
 
     # d256
     conv3 = tf.keras.layers.Conv2D(
@@ -68,7 +68,7 @@ def generator(nlabel):
         kernel_initializer=kernel_initializer,
         use_bias=False)(conv2)
     conv3 = tfa.layers.InstanceNormalization()(conv3)
-    conv3 = tf.keras.layers.Activation('relu')(conv3)
+    conv3 = tf.keras.layers.LeakyReLU()(conv3)
 
     # R256 x 9 times
     res = conv3
@@ -81,7 +81,7 @@ def generator(nlabel):
         kernel_initializer=kernel_initializer,
         use_bias=False)(res)
     deconv1 = tfa.layers.InstanceNormalization()(deconv1)
-    deconv1 = tf.keras.layers.Activation('relu')(deconv1)
+    deconv1 = tf.keras.layers.LeakyReLU()(deconv1)
 
     # u64
     deconv2 = tf.keras.layers.Conv2DTranspose(
@@ -89,7 +89,7 @@ def generator(nlabel):
         kernel_initializer=kernel_initializer,
         use_bias=False)(deconv1)
     deconv2 = tfa.layers.InstanceNormalization()(deconv2)
-    deconv2 = tf.keras.layers.Activation('relu')(deconv2)
+    deconv2 = tf.keras.layers.LeakyReLU()(deconv2)
 
     # c7s1-3
     conv4 = tf.keras.layers.Conv2D(
@@ -137,13 +137,6 @@ def discriminator(width, nlabel):
     return tf.keras.Model(inputs=[input_layer], outputs=[src_output, cls_output])
 
 
-def adverserial_loss(domain, target):
-    adv_1 = tf.reduce_mean(tf.math.log(tf.sigmoid(domain)))
-    adv_2 = tf.reduce_mean(tf.math.log(1 - tf.sigmoid(target)))
-
-    return adv_1 + adv_2
-
-
 def reconstruction_loss(realimg, rerealimg):
     return tf.reduce_mean(tf.abs(realimg - rerealimg))
 
@@ -167,8 +160,9 @@ class Stargan:
     def train_step(self, domimg, domcond, step):
         batch_size = domimg.shape[0]
 
-        tarcond = tf.random.uniform(
-            [batch_size, 2], maxval=2, dtype=tf.int32)
+        rand_idx = tf.random.uniform([batch_size], dtype=tf.int32, maxval=2)
+
+        tarcond = tf.one_hot(rand_idx, 2)
 
         targetcond = tf.map_fn(one2hot, elems=tarcond, dtype=tf.float32)
         domaincond = tf.map_fn(one2hot, elems=domcond, dtype=tf.float32)
@@ -202,14 +196,15 @@ class Stargan:
         with self.summary.as_default():
             tf.summary.scalar('disreal', real, step)
             tf.summary.scalar('disfake', fake, step)
-            tf.summary.scalar('gradpenal', grad_penal, step)
+            tf.summary.scalar('discls', classreal, step)
+            tf.summary.scalar('gp', grad_penal, step)
 
         grads = tape.gradient(totaldisloss,
                               self.discriminator.trainable_variables)
         self.disopti.apply_gradients(
             zip(grads, self.discriminator.trainable_variables))
 
-        if step % 5 == 0:
+        if (step + 1) % 5 == 0:
             with tf.GradientTape() as tape:
                 faketarimg = self.generator([domimg, targetcond])
                 fakedomimg = self.generator([faketarimg, domaincond])
