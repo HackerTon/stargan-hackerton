@@ -1,5 +1,21 @@
 import tensorflow as tf
-import tensorflow_addons as tfa
+
+
+def InstanceNorm(input):
+    mean, variance = tf.nn.moments(input, axes=[1, 2], keepdims=True)
+    output = (input - mean) / tf.maximum(variance, 1e-6)
+
+    return output
+
+
+def AdaptiveNorm(input, style, nfeatures=64):
+    style = tf.keras.layers.Dense(
+        units=nfeatures * 2)(style)  # (bs, style_dim)
+
+    normalized = InstanceNorm(input)
+    w = tf.split(style, num_or_size_splits=2, axis=1)  # (bs, nfeatures * 2)
+
+    return (1 + w[:, 0]) * normalized + w[:, 1]  # (bs, h, w, nfeatures)
 
 
 @tf.function
@@ -15,22 +31,18 @@ def one2hot(attr):
 
 
 def resi_block(input_layer, k):
-    kernel_initializer = tf.keras.initializers.RandomNormal(0.0, 0.02)
-
     # first block
     d_block = tf.keras.layers.Conv2D(
         k, (3, 3), (1, 1), padding='same',
-        kernel_initializer=kernel_initializer,
         use_bias=False)(input_layer)
-    d_block = tfa.layers.InstanceNormalization()(d_block)
+    d_block = InstanceNorm(d_block)
     d_block = tf.keras.layers.LeakyReLU()(d_block)
 
     # second block
     d2_block = tf.keras.layers.Conv2D(
         k, (3, 3), (1, 1), padding='same',
-        kernel_initializer=kernel_initializer,
         use_bias=False)(d_block)
-    d2_block = tfa.layers.InstanceNormalization()(d_block)
+    d2_block = InstanceNorm(d2_block)
     d2_block = tf.keras.layers.LeakyReLU()(d2_block)
 
     output = tf.keras.layers.Add()([d2_block, input_layer])
@@ -39,8 +51,6 @@ def resi_block(input_layer, k):
 
 
 def generator(nlabel):
-    kernel_initializer = tf.keras.initializers.RandomNormal(0.0, 0.02)
-
     img_input = tf.keras.layers.Input(shape=(None, None, 3))
     cond_input = tf.keras.layers.Input((None, None, nlabel))
 
@@ -49,25 +59,22 @@ def generator(nlabel):
     # c7s1-64
     conv1 = tf.keras.layers.Conv2D(
         64, (7, 7), 1, padding='same',
-        kernel_initializer=kernel_initializer,
         use_bias=False)(combined_input)
-    conv1 = tfa.layers.InstanceNormalization()(conv1)
+    conv1 = InstanceNorm(conv1)
     conv1 = tf.keras.layers.LeakyReLU()(conv1)
 
     # d128
     conv2 = tf.keras.layers.Conv2D(
         128, (3, 3), 2, padding='same',
-        kernel_initializer=kernel_initializer,
         use_bias=False)(conv1)
-    conv2 = tfa.layers.InstanceNormalization()(conv2)
+    conv2 = InstanceNorm(conv2)
     conv2 = tf.keras.layers.LeakyReLU()(conv2)
 
     # d256
     conv3 = tf.keras.layers.Conv2D(
         256, (3, 3), 2, padding='same',
-        kernel_initializer=kernel_initializer,
         use_bias=False)(conv2)
-    conv3 = tfa.layers.InstanceNormalization()(conv3)
+    conv3 = InstanceNorm(conv3)
     conv3 = tf.keras.layers.LeakyReLU()(conv3)
 
     # R256 x 9 times
@@ -78,23 +85,21 @@ def generator(nlabel):
     # u128
     deconv1 = tf.keras.layers.Conv2DTranspose(
         128, (3, 3), 2, padding='same',
-        kernel_initializer=kernel_initializer,
         use_bias=False)(res)
-    deconv1 = tfa.layers.InstanceNormalization()(deconv1)
+    deconv1 = InstanceNorm(deconv1)
     deconv1 = tf.keras.layers.LeakyReLU()(deconv1)
 
     # u64
     deconv2 = tf.keras.layers.Conv2DTranspose(
         64, (3, 3), 2, padding='same',
-        kernel_initializer=kernel_initializer,
         use_bias=False)(deconv1)
-    deconv2 = tfa.layers.InstanceNormalization()(deconv2)
+    deconv2 = InstanceNorm(deconv2)
     deconv2 = tf.keras.layers.LeakyReLU()(deconv2)
 
     # c7s1-3
     conv4 = tf.keras.layers.Conv2D(
         3, (7, 7), 1, padding='same', use_bias=False)(deconv2)
-    conv4 = tfa.layers.InstanceNormalization()(conv4)
+    conv4 = InstanceNorm(conv4)
     conv4 = tf.keras.layers.Activation('tanh')(conv4)
 
     return tf.keras.Model(inputs=[img_input, cond_input], outputs=[conv4])

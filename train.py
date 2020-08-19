@@ -2,6 +2,7 @@ import argparse
 import datetime
 import os
 import time
+import logging
 
 import numpy as np
 import tensorflow as tf
@@ -41,7 +42,7 @@ def create_dataset_celb(dir):
     filepath = os.path.join(dir, 'list_attr_celeba.txt')
     imgdir = os.path.join(dir, 'img_align_celeba')
 
-    textfile = tf.data.TextLineDataset(filepath)
+    textfile = tf.data.TextLineDataset(filepath, num_parallel_reads=AUTOTUNE)
     textfile = textfile.map(textparser, AUTOTUNE)
 
     adddir = lambda x, y: (imgdir + '/' + x, y)
@@ -68,8 +69,12 @@ def label2onehot_C(label):
 
 
 def train(args):
+    batch_size = 5
+    elems_size = 100000
+
+    logger = logging.getLogger(__name__)
     dataset = create_dataset_celb(args.dir)
-    batch_ds = dataset.take(1000).shuffle(10000).batch(5)
+    batch_ds = dataset.take(elems_size).shuffle(10000).batch(batch_size)
 
     suffix = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
     filename = os.path.join('logdir', suffix, 'train')
@@ -77,35 +82,28 @@ def train(args):
 
     stargan = model.Stargan(summarywriter, 128, 2)
     ckpt = tf.train.Checkpoint(
+        step=tf.Variable(1, dtype=tf.int64),
         generator=stargan.generator,
         discrimintor=stargan.discriminator,
         genopti=stargan.genopti,
-        disopti=stargan.disopti
+        disopti=stargan.disopti,
+        dataset=batch_ds
     )
 
-    ckptm = tf.train.CheckpointManager(ckpt, 'checkpoint', 10)
-    if ckptm.latest_checkpoint:
-        print(tf.train.list_variables(ckptm.latest_checkpoint))
-        print(f'Loaded checkpoint: {ckptm.latest_checkpoint}')
+    ckptm = tf.train.CheckpointManager(ckpt, 'checkpoint', 3)
     ckptm.restore_or_initialize()
 
-    step = 0
-
-    if os.path.isfile('iter.log'):
-        step_log = open('iter.log', 'r+')
-        readout = step_log.read()
-
-        if readout != '':
-            step = int(readout)
+    if ckptm.latest_checkpoint:
+        print(f'Loaded checkpoint: {ckptm.latest_checkpoint}')
     else:
-        step_log = open('iter.log', 'w+')
+        print('Initialized from scratch')
 
-    for it in range(args.iters):
+    for _ in range(args.iters):
         initial = time.time()
 
         for img, label in batch_ds:
-            stargan.train_step(img, label, tf.constant(step, tf.int64))
-            step += 1
+            stargan.train_step(img, label, ckpt.step)
+            ckpt.step.assign_add(1)
 
         for img, label in dataset.batch(2).take(1):
             label = label2onehot_C(tf.reverse(label, [-1]))
@@ -113,25 +111,27 @@ def train(args):
             inferred = stargan.generator([img, label])
 
             with summarywriter.as_default():
-                tf.summary.image('image', inferred * 0.5 + 0.5, step)
+                tf.summary.image('image', inferred * 0.5 + 0.5, ckpt.step)
 
         timetaken = time.time() - initial
+        speed = elems_size / timetaken
 
-        print(f'Timetaken per epoch: {round(timetaken, 5)}, {step}')
-        step_log.seek(0)
-        step_log.write(repr(step))
+        logger.info(f'Speed: {round(speed, 5)} img/second, {int(ckpt.step)}')
 
-        if it % 1 == 0:
-            ckptm.save(it)
-
-    step_log.close()
+        ckptm.save()
 
 
 if __name__ == "__main__":
+    logging.basicConfig(filename='log.txt', level=logging.INFO,
+                        format='%(asctime)s  %(message)s', datefmt='%d/%m/%Y %I:%M:%S %p')
+    logger = logging.getLogger(__name__)
+
+    logger.addHandler(logging.StreamHandler())
     parser = argparse.ArgumentParser()
     parser.add_argument('--dir', help='directory of the celeba',
                         required=True)
     parser.add_argument('--iters', help='number of iterations',
                         default=20)
 
+    logger.info('start training')
     train(parser.parse_args())
