@@ -18,7 +18,6 @@ def AdaptiveNorm(input, style, nfeatures=64):
     return (1 + w[:, 0]) * normalized + w[:, 1]  # (bs, h, w, nfeatures)
 
 
-@tf.function
 def one2hot(attr):
     attr = tf.cast(attr, dtype=tf.float32)
     cube = tf.TensorArray(tf.float32, 2, dynamic_size=True)
@@ -161,12 +160,15 @@ class Stargan:
         self.lambda_rec = float(lambda_rec)
         self.lambda_gp = float(lambda_gp)
 
-    @ tf.function
-    def train_step(self, domimg, domcond, step):
-        batch_size = domimg.shape[0]
+    @tf.function
+    def train(self, dataset, checkpoint, batch_size):
+        for img, label in dataset:
+            self.train_step(img, label, checkpoint.step, batch_size)
+            checkpoint.step.assign_add(1)
 
-        rand_idx = tf.random.uniform([batch_size], dtype=tf.int32, maxval=2)
-
+    def train_step(self, domimg, domcond, step, batch_size):
+        rand_idx = tf.random.uniform(tf.expand_dims(
+            batch_size, 0), dtype=tf.int32, maxval=2)
         tarcond = tf.one_hot(rand_idx, 2)
 
         targetcond = tf.map_fn(one2hot, elems=tarcond, dtype=tf.float32)

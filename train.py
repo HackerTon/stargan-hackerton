@@ -70,7 +70,7 @@ def label2onehot_C(label):
 
 def train(args):
     batch_size = 5
-    elems_size = 100000
+    elems_size = 10
 
     logger = logging.getLogger(__name__)
     dataset = create_dataset_celb(args.dir)
@@ -101,9 +101,7 @@ def train(args):
     for _ in range(args.iters):
         initial = time.time()
 
-        for img, label in batch_ds:
-            stargan.train_step(img, label, ckpt.step)
-            ckpt.step.assign_add(1)
+        stargan.train(batch_ds, ckpt, batch_size)
 
         for img, label in dataset.batch(2).take(1):
             label = label2onehot_C(tf.reverse(label, [-1]))
@@ -117,7 +115,6 @@ def train(args):
         speed = elems_size / timetaken
 
         logger.info(f'Speed: {round(speed, 5)} img/second, {int(ckpt.step)}')
-
         ckptm.save()
 
 
