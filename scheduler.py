@@ -1,8 +1,7 @@
-from tensorflow.keras.optimizers.schedules import LearningRateSchedule
-from tensorflow.python.ops import math_ops
-from tensorflow.python.ops import control_flow_ops
-from tensorflow.python.framework import ops
 import tensorflow as tf
+from tensorflow.keras.optimizers.schedules import LearningRateSchedule
+from tensorflow.python.framework import ops
+from tensorflow.python.ops import control_flow_ops, math_ops
 
 
 class LinearDecay(LearningRateSchedule):

@@ -6,7 +6,7 @@ from tensorflow.python.ops.nn_impl import normalize
 
 
 class InstanceNorm(tf.Module):
-    def __init__(self, name=None, affine=False):
+    def __init__(self, name='InstanceNorm', affine=True):
         super().__init__(name=name)
         self.affine = affine
         self.gamma = tf.Variable(1.0)
@@ -24,7 +24,7 @@ class InstanceNorm(tf.Module):
 
 
 class AdaptiveNorm(tf.Module):
-    def __init__(self, name=None, nfeatures=64):
+    def __init__(self, name='AdaptiveNorm', nfeatures=64):
         super().__init__(name=name)
         self.norm = InstanceNorm()
         self.style = tf.keras.layers.Dense(nfeatures * 2)

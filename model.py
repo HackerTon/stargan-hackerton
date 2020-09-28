@@ -1,21 +1,10 @@
 import tensorflow as tf
 
-
-def InstanceNorm(input):
-    mean, variance = tf.nn.moments(input, axes=[1, 2], keepdims=True)
-    output = (input - mean) / tf.maximum(variance, 1e-6)
-
-    return output
+from model_v2 import InstanceNorm
 
 
-def AdaptiveNorm(input, style, nfeatures=64):
-    style = tf.keras.layers.Dense(
-        units=nfeatures * 2)(style)  # (bs, style_dim)
-
-    normalized = InstanceNorm(input)
-    w = tf.split(style, num_or_size_splits=2, axis=1)  # (bs, nfeatures * 2)
-
-    return (1 + w[:, 0]) * normalized + w[:, 1]  # (bs, h, w, nfeatures)
+def reconstruction_loss(realimg, rerealimg):
+    return tf.reduce_mean(tf.abs(realimg - rerealimg))
 
 
 def one2hot(attr):
@@ -34,15 +23,15 @@ def resi_block(input_layer, k):
     d_block = tf.keras.layers.Conv2D(
         k, (3, 3), (1, 1), padding='same',
         use_bias=False)(input_layer)
-    d_block = InstanceNorm(d_block)
-    d_block = tf.keras.layers.LeakyReLU()(d_block)
+    d_block = InstanceNorm()(d_block)
+    d_block = tf.keras.layers.ReLU()(d_block)
 
     # second block
     d2_block = tf.keras.layers.Conv2D(
         k, (3, 3), (1, 1), padding='same',
         use_bias=False)(d_block)
-    d2_block = InstanceNorm(d2_block)
-    d2_block = tf.keras.layers.LeakyReLU()(d2_block)
+    d2_block = InstanceNorm()(d2_block)
+    d2_block = tf.keras.layers.ReLU()(d2_block)
 
     output = tf.keras.layers.Add()([d2_block, input_layer])
 
@@ -59,22 +48,22 @@ def generator(nlabel):
     conv1 = tf.keras.layers.Conv2D(
         64, (7, 7), 1, padding='same',
         use_bias=False)(combined_input)
-    conv1 = InstanceNorm(conv1)
-    conv1 = tf.keras.layers.LeakyReLU()(conv1)
+    conv1 = InstanceNorm()(conv1)
+    conv1 = tf.keras.layers.ReLU()(conv1)
 
     # d128
     conv2 = tf.keras.layers.Conv2D(
         128, (3, 3), 2, padding='same',
         use_bias=False)(conv1)
-    conv2 = InstanceNorm(conv2)
-    conv2 = tf.keras.layers.LeakyReLU()(conv2)
+    conv2 = InstanceNorm()(conv2)
+    conv2 = tf.keras.layers.ReLU()(conv2)
 
     # d256
     conv3 = tf.keras.layers.Conv2D(
         256, (3, 3), 2, padding='same',
         use_bias=False)(conv2)
-    conv3 = InstanceNorm(conv3)
-    conv3 = tf.keras.layers.LeakyReLU()(conv3)
+    conv3 = InstanceNorm()(conv3)
+    conv3 = tf.keras.layers.ReLU()(conv3)
 
     # R256 x 9 times
     res = conv3
@@ -85,64 +74,43 @@ def generator(nlabel):
     deconv1 = tf.keras.layers.Conv2DTranspose(
         128, (3, 3), 2, padding='same',
         use_bias=False)(res)
-    deconv1 = InstanceNorm(deconv1)
-    deconv1 = tf.keras.layers.LeakyReLU()(deconv1)
+    deconv1 = InstanceNorm()(deconv1)
+    deconv1 = tf.keras.layers.ReLU()(deconv1)
 
     # u64
     deconv2 = tf.keras.layers.Conv2DTranspose(
         64, (3, 3), 2, padding='same',
         use_bias=False)(deconv1)
-    deconv2 = InstanceNorm(deconv2)
-    deconv2 = tf.keras.layers.LeakyReLU()(deconv2)
+    deconv2 = InstanceNorm()(deconv2)
+    deconv2 = tf.keras.layers.ReLU()(deconv2)
 
     # c7s1-3
     conv4 = tf.keras.layers.Conv2D(
         3, (7, 7), 1, padding='same', use_bias=False)(deconv2)
-    conv4 = InstanceNorm(conv4)
+    conv4 = InstanceNorm()(conv4)
     conv4 = tf.keras.layers.Activation('tanh')(conv4)
 
-    return tf.keras.Model(inputs=[img_input, cond_input], outputs=[conv4])
+    return tf.keras.Model(inputs=[img_input, cond_input], outputs=[conv4], name='generator')
 
 
 def discriminator(width, nlabel):
-    input_layer = tf.keras.layers.Input((width, width, 3))
-    conv1 = tf.keras.layers.Conv2D(64, (4, 4),
-                                   (2, 2), padding='same')(input_layer)
-    conv1 = tf.keras.layers.LeakyReLU()(conv1)
+    input_layer = tf.keras.layers.Input((128, 128, 3))
+    output = input_layer
 
-    conv2 = tf.keras.layers.Conv2D(128, (4, 4),
-                                   (2, 2), padding='same')(conv1)
-    conv2 = tf.keras.layers.LeakyReLU()(conv2)
-
-    conv3 = tf.keras.layers.Conv2D(256, (4, 4),
-                                   (2, 2), padding='same')(conv2)
-    conv3 = tf.keras.layers.LeakyReLU()(conv3)
-
-    conv4 = tf.keras.layers.Conv2D(512, (4, 4),
-                                   (2, 2), padding='same')(conv3)
-    conv4 = tf.keras.layers.LeakyReLU()(conv4)
-
-    conv5 = tf.keras.layers.Conv2D(1024, (4, 4),
-                                   (2, 2), padding='same')(conv4)
-    conv5 = tf.keras.layers.LeakyReLU()(conv5)
-
-    conv6 = tf.keras.layers.Conv2D(2048, (4, 4),
-                                   (2, 2), padding='same')(conv5)
-    conv6 = tf.keras.layers.LeakyReLU()(conv6)
+    for i in range(6):
+        output = tf.keras.layers.Conv2D((2**i) * 64, (4, 4),
+                                        (2, 2), padding='same')(output)
+        output = tf.keras.layers.LeakyReLU(0.01)(output)
 
     src_output = tf.keras.layers.Conv2D(1, (3, 3),
                                         (1, 1), padding='same',
-                                        use_bias=False)(conv6)
+                                        use_bias=False)(output)
 
     cls_output = tf.keras.layers.Conv2D(nlabel, (width // 64, width // 64),
                                         (1, 1), padding='valid',
-                                        use_bias=False)(conv6)
+                                        use_bias=False)(output)
 
-    return tf.keras.Model(inputs=[input_layer], outputs=[src_output, cls_output])
-
-
-def reconstruction_loss(realimg, rerealimg):
-    return tf.reduce_mean(tf.abs(realimg - rerealimg))
+    return tf.keras.Model(inputs=[input_layer], outputs=[src_output, cls_output], name='discriminator')
 
 
 class Stargan:
@@ -152,13 +120,14 @@ class Stargan:
         self.disopti = tf.keras.optimizers.Adam(1e-4, 0.5)
         self.genopti = tf.keras.optimizers.Adam(1e-4, 0.5)
         self.summary: tf.summary.SummaryWriter = summary
-        self.width = width
         self.binloss = tf.keras.losses.BinaryCrossentropy(from_logits=True)
+        self.width = width
         self.nlabel = nlabel
-
         self.lambda_cls = float(lambda_cls)
         self.lambda_rec = float(lambda_rec)
         self.lambda_gp = float(lambda_gp)
+
+        self.discriminator.summary()
 
     @tf.function
     def train(self, dataset, checkpoint, batch_size):

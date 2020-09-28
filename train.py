@@ -1,8 +1,8 @@
 import argparse
 import datetime
+import logging
 import os
 import time
-import logging
 
 import numpy as np
 import tensorflow as tf
@@ -54,9 +54,6 @@ def create_dataset_celb(dir):
     return ds
 
 
-ds = create_dataset_celb('/home/hackerton/cyclegan_dataset')
-
-
 def label2onehot_C(label):
     batch_size = label.shape[0]
     arr = np.zeros([batch_size, 128, 128, 2])
@@ -69,12 +66,11 @@ def label2onehot_C(label):
 
 
 def train(args):
-    batch_size = 5
-    elems_size = 10
+    batch_size = args.bs
 
     logger = logging.getLogger(__name__)
     dataset = create_dataset_celb(args.dir)
-    batch_ds = dataset.take(elems_size).shuffle(10000).batch(batch_size)
+    batch_ds = dataset.shuffle(10000).batch(batch_size)
 
     suffix = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
     filename = os.path.join('logdir', suffix, 'train')
@@ -100,10 +96,9 @@ def train(args):
 
     for _ in range(args.iters):
         initial = time.time()
-
         stargan.train(batch_ds, ckpt, batch_size)
 
-        for img, label in dataset.batch(2).take(1):
+        for img, label in dataset.batch(10).take(1):
             label = label2onehot_C(tf.reverse(label, [-1]))
 
             inferred = stargan.generator([img, label])
@@ -112,9 +107,8 @@ def train(args):
                 tf.summary.image('image', inferred * 0.5 + 0.5, ckpt.step)
 
         timetaken = time.time() - initial
-        speed = elems_size / timetaken
-
-        logger.info(f'Speed: {round(speed, 5)} img/second, {int(ckpt.step)}')
+        logger.info(
+            f'Speed: {round(timetaken, 5)} epoch/second, {int(ckpt.step)}')
         ckptm.save()
 
 
@@ -129,6 +123,8 @@ if __name__ == "__main__":
                         required=True)
     parser.add_argument('--iters', help='number of iterations',
                         default=20)
+    parser.add_argument('--bs', help='batch size',
+                        default=5)
 
     logger.info('start training')
     train(parser.parse_args())
