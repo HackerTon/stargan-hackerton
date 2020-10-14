@@ -127,8 +127,6 @@ class Stargan:
         self.lambda_rec = float(lambda_rec)
         self.lambda_gp = float(lambda_gp)
 
-        self.discriminator.summary()
-
     @tf.function
     def train(self, dataset, checkpoint, batch_size):
         for img, label in dataset:

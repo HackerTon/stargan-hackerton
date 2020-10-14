@@ -6,8 +6,10 @@ import time
 
 import numpy as np
 import tensorflow as tf
+from tensorflow.python.ops.gen_batch_ops import batch
 
 import model
+from helper.benchmark import benchmark_dataset
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 
@@ -55,7 +57,7 @@ def create_dataset_celb(dir):
 
 
 def label2onehot_C(label):
-    batch_size = label.shape[0]
+    batch_size = tf.shape(label)[0]
     arr = np.zeros([batch_size, 128, 128, 2])
 
     for i in range(batch_size):
@@ -66,11 +68,12 @@ def label2onehot_C(label):
 
 
 def train(args):
-    batch_size = args.bs
+    batch_size = int(args.bs)
 
     logger = logging.getLogger(__name__)
     dataset = create_dataset_celb(args.dir)
-    batch_ds = dataset.shuffle(10000).batch(batch_size)
+    batch_ds = dataset.shuffle(1000).batch(
+        batch_size, drop_remainder=True)
 
     suffix = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
     filename = os.path.join('logdir', suffix, 'train')
@@ -103,8 +106,11 @@ def train(args):
 
             inferred = stargan.generator([img, label])
 
+            print(inferred.shape)
+
             with summarywriter.as_default():
-                tf.summary.image('image', inferred * 0.5 + 0.5, ckpt.step)
+                tf.summary.image('image', inferred * 0.5 +
+                                 0.5, ckpt.step, max_outputs=10)
 
         timetaken = time.time() - initial
         logger.info(
@@ -116,7 +122,6 @@ if __name__ == "__main__":
     logging.basicConfig(filename='log.txt', level=logging.INFO,
                         format='%(asctime)s  %(message)s', datefmt='%d/%m/%Y %I:%M:%S %p')
     logger = logging.getLogger(__name__)
-
     logger.addHandler(logging.StreamHandler())
     parser = argparse.ArgumentParser()
     parser.add_argument('--dir', help='directory of the celeba',
@@ -125,6 +130,5 @@ if __name__ == "__main__":
                         default=20)
     parser.add_argument('--bs', help='batch size',
                         default=5)
-
     logger.info('start training')
     train(parser.parse_args())
