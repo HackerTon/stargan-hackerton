@@ -1,10 +1,13 @@
+from threading import Semaphore
 import tensorflow as tf
 from tensorflow import keras
+from tensorflow.python.keras.engine.sequential import Sequential
 from tensorflow.python.keras.layers.advanced_activations import LeakyReLU
 from tensorflow.python.keras.utils.version_utils import training
 from tensorflow.python.ops.gen_data_flow_ops import map_incomplete_size
 from tensorflow.python.ops.linalg_ops import norm
 from tensorflow.python.ops.nn_impl import normalize
+from tensorflow.python.training.tracking.base import no_manual_dependency_tracking_scope
 
 
 class InstanceNorm(keras.layers.Layer):
@@ -25,20 +28,23 @@ class InstanceNorm(keras.layers.Layer):
         return self.affinetrans(output)
 
 
-class AdaptiveNorm(tf.Module):
-    def __init__(self, name='AdaptiveNorm', nfeatures=64):
-        super().__init__(name=name)
+class AdaptiveNorm(keras.layers.Layer):
+    def __init__(self, nfeatures=64, **kargs):
+        super().__init__(**kargs)
+        self.nfeatures = nfeatures
         self.norm = InstanceNorm()
-        self.style = tf.keras.layers.Dense(nfeatures * 2)
 
-    def __call__(self, x, s):
-        style = self.style(s)
+    def build(self, input_shape: tf.TensorShape):
+        self.chandims = input_shape[0][-1]
+        self.beta = keras.layers.Dense(self.chandims, input_shape=[64])
+        self.gamma = keras.layers.Dense(self.chandims, input_shape=[64])
 
-        normalized = self.norm(x)
-        w = tf.split(style, num_or_size_splits=2,
-                     axis=1)  # (bs, nfeatures * 2)
+    def call(self, inputs):
+        beta = tf.reshape(self.beta(inputs[1]), [-1, 1, 1, self.chandims])
+        gamma = tf.reshape(self.gamma(inputs[1]), [-1, 1, 1, self.chandims])
+        normalized = self.norm(inputs[0])
 
-        return (1 + w[:, 0]) * normalized + w[:, 1]  # (bs, h, w, nfeatures)
+        return (1 + gamma) * normalized + beta  # (bs, h, w, nfeatures)
 
 
 class Resblk(keras.layers.Layer):
@@ -58,20 +64,19 @@ class Resblk(keras.layers.Layer):
             self.layers.append(InstanceNorm(affine=self.affine))
 
         self.layers.append(keras.layers.LeakyReLU(0.2))
-        self.layers.append(keras.layers.Conv2D(chandim, 3, padding='same'))
-
-        self.layers.append(keras.layers.LeakyReLU(0.2))
         self.layers.append(keras.layers.Conv2D(
             self.nfilter, 3, padding='same'))
 
-        if input_shape[-1] != self.nfilter:
+        if self.downsample:
+            self.layers.append(keras.layers.AvgPool2D())
+
+        if chandim != self.nfilter:
             self.shortcut.append(keras.layers.Conv2D(
                 self.nfilter, 1, padding='valid'))
         else:
             self.shortcut.append(keras.layers.Activation('linear'))
 
         if self.downsample:
-            self.layers.append(keras.layers.AvgPool2D())
             self.shortcut.append(keras.layers.AvgPool2D())
 
     def call(self, inputs):
@@ -85,6 +90,57 @@ class Resblk(keras.layers.Layer):
 
         outputs = outputs + outshort
         return outputs
+
+
+class Adaresblk(Resblk):
+    def __init__(self, filters=128, upsample=False, normalize=False, affine=True, **kargs):
+        super().__init__(filters, normalize=normalize, affine=affine, **kargs)
+        self.upsample = upsample
+
+    def build(self, input_shape: tf.TensorShape):
+        chandim = input_shape[0][-1]
+
+        if self.normalize:
+            self.normalize1 = AdaptiveNorm()
+            self.normalize2 = AdaptiveNorm()
+        else:
+            self.normalize1 = keras.layers.Activation('linear')
+            self.normalize2 = keras.layers.Activation('linear')
+
+        self.lrelu1 = keras.layers.LeakyReLU(0.2)
+
+        if self.upsample:
+            self.upsample1 = keras.layers.UpSampling2D()
+            self.upsample2 = keras.layers.UpSampling2D()
+        else:
+            self.upsample1 = keras.layers.Activation('linear')
+            self.upsample2 = keras.layers.Activation('linear')
+
+        self.conv1 = keras.layers.Conv2D(
+            chandim, 3, padding='same')
+
+        self.lrelu2 = keras.layers.LeakyReLU(0.2)
+
+        self.conv2 = keras.layers.Conv2D(
+            self.nfilter, 3, padding='same')
+
+        if chandim != self.nfilter:
+            self.shortcut = keras.layers.Conv2D(
+                self.nfilter, 1, padding='valid')
+        else:
+            self.shortcut = keras.layers.Activation('linear')
+
+    def call(self, inputs):  # [images, style]
+        outputs = self.normalize1(inputs)
+        outputs = self.lrelu1(outputs)
+        outputs = self.upsample1(outputs)
+        outputs = self.conv1(outputs)
+        outputs = self.normalize2([outputs, inputs[1]])
+        outputs = self.lrelu2(outputs)
+        outputs = self.conv2(outputs)
+        shortcuts = self.shortcut(self.upsample2(inputs[0]))
+
+        return outputs + shortcuts
 
 
 def create_mapping_head() -> keras.Sequential:
@@ -183,7 +239,33 @@ class Styleencoder(keras.Model):
 class Generator(keras.Model):
     def __init__(self, **kargs):
         super().__init__(**kargs)
-        self.model = create_generator()
+        self.model = []
+        self.model2 = []
 
-    def call(self, inputs, latent):
-        pass
+        self.model.append(keras.layers.Conv2D(64, 1, padding='same'))
+
+        self.model.append(Resblk(128, True, True))
+        self.model.append(Resblk(256, True, True))
+        self.model.append(Resblk(512, True, True))
+        self.model.append(Resblk(512, True, True))
+
+        self.model.append(Resblk(512, normalize=True))
+        self.model.append(Resblk(512, normalize=True))
+
+        self.model2.append(Adaresblk(512, normalize=True))
+        self.model2.append(Adaresblk(512, normalize=True))
+        self.model2.append(Adaresblk(512, True, True))
+        self.model2.append(Adaresblk(256, True, True))
+        self.model2.append(Adaresblk(128, True, True))
+        self.model2.append(Adaresblk(64, True, True))
+        self.convf = keras.layers.Conv2D(3, 1, padding='same')
+
+    def call(self, inputs):  # inputs [images, style]
+        outputs = inputs[0]
+        for layer in self.model:
+            outputs = layer(outputs)
+        for layer in self.model2:
+            outputs = layer([outputs, inputs[1]])
+        outputs = self.convf(outputs)
+
+        return outputs
