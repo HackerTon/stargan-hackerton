@@ -3,5 +3,4 @@ inferencing/
 checkpoint/
 logdir/
 .vscode
-test.py
 log.txt
