@@ -85,7 +85,6 @@ def train_step(dataset: tf.data.Dataset,
         target_d = tf.random.uniform([bs], maxval=2, dtype=tf.int32)
 
         with tf.GradientTape() as gd:
-            
 
                 # adver_loss(d(x), d(g(x, s))) optimize discriminator
             pass
