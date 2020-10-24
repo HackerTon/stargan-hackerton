@@ -12,6 +12,9 @@ jobs:
           args: tensorflow
           pkg-manager: pipenv
       - run:
+          command: pipenv shell
+          name: run pipenv
+      - run:
           command: python -m unittest
           name: Test
 
