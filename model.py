@@ -53,14 +53,14 @@ def generator(nlabel):
 
     # d128
     conv2 = tf.keras.layers.Conv2D(
-        128, (3, 3), 2, padding='same',
+        128, (4, 4), 2, padding='same',
         use_bias=False)(conv1)
     conv2 = InstanceNorm()(conv2)
     conv2 = tf.keras.layers.ReLU()(conv2)
 
     # d256
     conv3 = tf.keras.layers.Conv2D(
-        256, (3, 3), 2, padding='same',
+        256, (4, 4), 2, padding='same',
         use_bias=False)(conv2)
     conv3 = InstanceNorm()(conv3)
     conv3 = tf.keras.layers.ReLU()(conv3)

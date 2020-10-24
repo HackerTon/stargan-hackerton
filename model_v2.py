@@ -1,3 +1,4 @@
+import enum
 from threading import Semaphore
 import tensorflow as tf
 from tensorflow import keras
@@ -173,10 +174,18 @@ class Mapping(keras.Model):
         for _ in range(num_head):
             self.head.append(create_mapping_head())
 
-    def __call__(self, latent, idxhead):
+    def __call__(self, latent, head):
         out_latent = self.mlp(latent)
-        out_head = self.head[idxhead](out_latent)
-        return out_head
+        results = tf.TensorArray(tf.float32, size=0, dynamic_size=True)
+
+        for idx, layer in enumerate(self.head):
+            results.write(idx, layer(out_latent))
+
+        outputs = tf.transpose(results.stack(), [1, 0, 2])
+        outputs = tf.gather(outputs, head, axis=1, batch_dims=1)
+        outputs = tf.squeeze(outputs, axis=1)
+
+        return outputs
 
 
 def create_style_network() -> keras.Sequential:
@@ -217,7 +226,16 @@ class Discriminator(keras.Model):
     def call(self, inputs, head):
         outputs = self.model(inputs)
         outputs = self.reshape(outputs)
-        return self.head[head](outputs)
+
+        results = tf.TensorArray(tf.float32, size=0, dynamic_size=True)
+        for idx, layer in enumerate(self.head):
+            results.write(idx, layer(outputs))
+
+        outputs = tf.transpose(results.stack(), [1, 0, 2])
+        outputs = tf.gather(outputs, head, axis=1, batch_dims=-1)
+        outputs = tf.squeeze(outputs, axis=1)
+
+        return outputs
 
 
 class Styleencoder(keras.Model):
@@ -233,7 +251,16 @@ class Styleencoder(keras.Model):
     def call(self, inputs, head):
         outputs = self.model(inputs)
         outputs = self.reshape(outputs)
-        return self.head[head](outputs)
+
+        results = tf.TensorArray(tf.float32, size=0, dynamic_size=True)
+        for idx, layer in enumerate(self.head):
+            results.write(idx, layer(outputs))
+
+        outputs = tf.transpose(results.stack(), [1, 0, 2])
+        outputs = tf.gather(outputs, head, axis=1, batch_dims=1)
+        outputs = tf.squeeze(outputs, axis=1)
+
+        return outputs
 
 
 class Generator(keras.Model):
@@ -269,3 +296,24 @@ class Generator(keras.Model):
         outputs = self.convf(outputs)
 
         return outputs
+
+
+class StarGanV2:
+    def __init__(self, K=2):
+        # K is num of domain, celeba is K=2
+        self.K = K
+        self.gen = Generator()
+        self.dis = Discriminator(K=K)
+        self.map = Mapping(K=K)
+        self.enc = Styleencoder(K=K)
+
+    # @tf.function
+    # enable tf.function only after successful test
+    def train(self, dataset: tf.data.Dataset, summary: tf.summary.SummaryWriter, ckpt: tf.train.Checkpoint):
+        ckpt.step.assign_add(1)
+
+        for img, domain in dataset:  # [bs, 256, 256, 3], [bs]
+            bs = tf.shape(domain)[0]
+
+            dtrg = tf.random.uniform([bs], maxval=self.K, dtype=tf.int32)
+            rloss = self.dis(img, bs)

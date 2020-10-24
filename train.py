@@ -6,65 +6,17 @@ import time
 
 import numpy as np
 import tensorflow as tf
-from tensorflow.python.ops.gen_batch_ops import batch
+from tensorflow import keras
+from tensorflow._api.v2 import data
 
 import model
+import model_v2
 from helper.benchmark import benchmark_dataset
+from ops import create_dataset, create_dataset_celb, label2onehot_C
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 
 tf.random.set_seed(1234567)
-
-
-def readdecode(filename, attr):
-    raw = tf.io.read_file(filename)
-
-    image = tf.image.decode_jpeg(raw, channels=3)
-    image = tf.image.convert_image_dtype(image, tf.float32)
-    image = image[20:-20, :]
-    image = tf.image.resize(image, (128, 128))
-    image = image * 2 - 1
-
-    attr = [0.0, 1.0] if attr == b'1' else [1.0, 0.0]
-
-    return image, attr
-
-
-def textparser(text):
-    strings = tf.strings.split(text, ' ')
-    mask = tf.strings.regex_full_match(strings, '-?1')
-    new_strings = tf.boolean_mask(strings, mask)
-
-    link = strings[0]
-
-    return link, new_strings[-20]
-
-
-def create_dataset_celb(dir):
-    filepath = os.path.join(dir, 'list_attr_celeba.txt')
-    imgdir = os.path.join(dir, 'img_align_celeba')
-
-    textfile = tf.data.TextLineDataset(filepath, num_parallel_reads=AUTOTUNE)
-    textfile = textfile.map(textparser, AUTOTUNE)
-
-    adddir = lambda x, y: (imgdir + '/' + x, y)
-    link2image = lambda link, attr: readdecode(link, attr)
-
-    ds = textfile.map(adddir, AUTOTUNE)
-    ds = ds.map(link2image, AUTOTUNE)
-
-    return ds
-
-
-def label2onehot_C(label):
-    batch_size = tf.shape(label)[0]
-    arr = np.zeros([batch_size, 128, 128, 2])
-
-    for i in range(batch_size):
-        arr[i, :, :, 0] = label[i, 0]
-        arr[i, :, :, 1] = label[i, 1]
-
-    return arr
 
 
 def train(args):
@@ -80,14 +32,13 @@ def train(args):
     summarywriter = tf.summary.create_file_writer(filename)
 
     stargan = model.Stargan(summarywriter, 128, 2)
-    ckpt = tf.train.Checkpoint(
-        step=tf.Variable(1, dtype=tf.int64),
-        generator=stargan.generator,
-        discrimintor=stargan.discriminator,
-        genopti=stargan.genopti,
-        disopti=stargan.disopti,
-        dataset=batch_ds
-    )
+    ckpt = tf.train.Checkpoint(step=tf.Variable(1, dtype=tf.int64),
+                               generator=stargan.generator,
+                               discrimintor=stargan.discriminator,
+                               genopti=stargan.genopti,
+                               disopti=stargan.disopti,
+                               dataset=batch_ds
+                               )
 
     ckptm = tf.train.CheckpointManager(ckpt, 'checkpoint', 3)
     ckptm.restore_or_initialize()
@@ -116,6 +67,69 @@ def train(args):
         logger.info(
             f'Speed: {round(timetaken, 5)} epoch/second, {int(ckpt.step)}')
         ckptm.save()
+
+
+# @tf.function
+# enable tf.function if initial training is successful
+def train_step(dataset: tf.data.Dataset,
+               generator: keras.Model,
+               discriminator: keras.Model,
+               encoder: keras.Model,
+               mapping: keras.Model,
+               summary: tf.summary.SummaryWriter,
+               ckpt: tf.train.Checkpoint):
+
+    for image, domain in dataset:
+        bs = tf.shape(image)[0]
+        ckpt.step.assign_add(1)
+        target_d = tf.random.uniform([bs], maxval=2, dtype=tf.int32)
+
+        with tf.GradientTape() as gd:
+            
+
+                # adver_loss(d(x), d(g(x, s))) optimize discriminator
+            pass
+
+        with tf.GradientTape() as gt, tf.GradientTape() as gn, tf.GradientTape() as gm:
+            # adver_loss(d(x), d(g(x, s))) optimize generator
+            pass
+
+
+def train2(args):
+    dir = str(args.dir)
+    iters = int(args.iters)
+    bs = int(args.bs)
+    dataset = create_dataset(dir)
+
+    suffix = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+    filename = os.path.join('logdir', suffix, 'train')
+    summarywriter = tf.summary.create_file_writer(filename)
+
+    generator = model_v2.Generator()
+    discriminator = model_v2.Discriminator()
+    encoder = model_v2.Styleencoder()
+    mapping = model_v2.Mapping()
+
+    cpkt = tf.train.Checkpoint(step=tf.Variable(1, dtyle=tf.int32),
+                               generator=generator,
+                               discriminator=discriminator,
+                               encoder=encoder,
+                               mapping=mapping)
+    ckptm = tf.train.CheckpointManager(cpkt, 'checkpoint', 3)
+    ckptm.restore_or_initialize()
+
+    if ckptm.latest_checkpoint:
+        print(f'Loaded checkpoint: {ckptm.latest_checkpoint}')
+    else:
+        print('Initialized from scratch')
+
+    batched = dataset.batch(bs, drop_remainder=True)
+
+    for _ in range(iters):
+        inittime = time.time()
+        train_step(batched, generator, discriminator,
+                   encoder, mapping, summary, ckpt)
+        tmlapse = time.time() - inittime
 
 
 if __name__ == "__main__":
