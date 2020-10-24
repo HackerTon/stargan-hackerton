@@ -8,7 +8,7 @@ jobs:
     executor: python/default
     steps:
       - checkout
-      - python/install-packages
+      - python/install-packages:
           args: tensorflow
           pkg-manager: pipenv
       - run:
