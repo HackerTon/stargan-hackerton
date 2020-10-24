@@ -4,19 +4,19 @@ orbs:
   python: circleci/python@0.2.1
 
 jobs:
-  build-and-test:
+  test:
     executor: python/default
     steps:
       - checkout
-      - python/load-cache
-      - python/install-deps
-      - python/save-cache
+      - python/install-packages
+          args: tensorflow
+          pkg-manager: pipenv
       - run:
-          command: ./manage.py test
+          command: python -m unittest
           name: Test
 
 workflows:
   main:
     jobs:
-      - build-and-test
+      - test
 
