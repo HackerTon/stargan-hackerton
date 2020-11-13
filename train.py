@@ -52,11 +52,11 @@ def train(args):
         initial = time.time()
         stargan.train(batch_ds, ckpt, batch_size)
 
+        # show inferred images on tensorflow
         for img, label in dataset.batch(10).take(1):
             label = label2onehot_C(tf.reverse(label, [-1]))
 
             inferred = stargan.generator([img, label])
-
             print(inferred.shape)
 
             with summarywriter.as_default():

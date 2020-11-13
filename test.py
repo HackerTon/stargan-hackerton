@@ -1,6 +1,10 @@
+import numpy as np
+from ops import create_dataset, create_dataset_celb, r1_loss
 import unittest
 
 import tensorflow as tf
+from tensorflow.python.keras.utils.version_utils import ModelVersionSelector
+from tensorflow.python.ops.functional_ops import Gradient
 
 import model as mdl
 import model_v2
@@ -80,6 +84,20 @@ class Outputtest(unittest.TestCase):
         shape = tf.TensorShape([1, 256, 256, 3])
         sample = tf.random.uniform([1, 256, 256, 3])
         style = tf.random.uniform([1, 64])
-        output = generator([sample, style])
+        output = generator(sample, style)
 
         self.assertEqual(shape, tf.shape(output))
+
+    def testr1loss(self):
+        dis = model_v2.Discriminator(5)
+        sample = tf.random.uniform([5, 256, 256, 3])
+        domain = tf.random.uniform([5, 1], maxval=4, dtype=tf.int32)
+        shape = tf.TensorShape([])
+
+        out = r1_loss(dis, sample, domain)
+        self.assertEqual(shape, tf.shape(out))
+
+    def gradtest(self):
+        zeros1 = np.zeros([1, 256, 256, 3])
+        zeros2 = np.zeros([1])
+        ds = tf.data.Dataset.from_tensor_slices((zeros1, zeros2))

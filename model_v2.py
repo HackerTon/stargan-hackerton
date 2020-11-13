@@ -1,14 +1,9 @@
-import enum
-from threading import Semaphore
+import numpy as np
+from tensorflow.python.keras.backend import dtype
+from tensorflow.python.training.queue_runner_impl import start_queue_runners
+from ops import r1_loss
 import tensorflow as tf
 from tensorflow import keras
-from tensorflow.python.keras.engine.sequential import Sequential
-from tensorflow.python.keras.layers.advanced_activations import LeakyReLU
-from tensorflow.python.keras.utils.version_utils import training
-from tensorflow.python.ops.gen_data_flow_ops import map_incomplete_size
-from tensorflow.python.ops.linalg_ops import norm
-from tensorflow.python.ops.nn_impl import normalize
-from tensorflow.python.training.tracking.base import no_manual_dependency_tracking_scope
 
 
 class InstanceNorm(keras.layers.Layer):
@@ -287,12 +282,12 @@ class Generator(keras.Model):
         self.model2.append(Adaresblk(64, True, True))
         self.convf = keras.layers.Conv2D(3, 1, padding='same')
 
-    def call(self, inputs):  # inputs [images, style]
-        outputs = inputs[0]
+    def call(self, inputs, head):  # inputs [images, style]
+        outputs = inputs
         for layer in self.model:
             outputs = layer(outputs)
         for layer in self.model2:
-            outputs = layer([outputs, inputs[1]])
+            outputs = layer([outputs, head])
         outputs = self.convf(outputs)
 
         return outputs
@@ -304,8 +299,12 @@ class StarGanV2:
         self.K = K
         self.gen = Generator()
         self.dis = Discriminator(K=K)
-        self.map = Mapping(K=K)
+        self.map = Mapping(num_head=K)
         self.enc = Styleencoder(K=K)
+        self.binloss = keras.losses.BinaryCrossentropy(from_logits=True)
+        self.dopti = tf.keras.optimizers.Adam()
+
+    # INPUT FOR IMG MUST BE FLOAT32, WHILE INT32 FOR DOMAIN
 
     # @tf.function
     # enable tf.function only after successful test
@@ -313,7 +312,41 @@ class StarGanV2:
         ckpt.step.assign_add(1)
 
         for img, domain in dataset:  # [bs, 256, 256, 3], [bs]
-            bs = tf.shape(domain)[0]
+            bs = tf.shape(img)[0]
+            latent = tf.random.normal([bs, 16])
+            dtrg = tf.random.uniform(
+                [bs, 1], maxval=self.K, dtype=tf.int32)  # [bs, 1] rank2
+            ones = tf.ones_like([bs], dtype=tf.float32)
+            zeros = tf.zeros_like([bs], dtype=tf.float32)
 
-            dtrg = tf.random.uniform([bs], maxval=self.K, dtype=tf.int32)
-            rloss = self.dis(img, bs)
+            style = self.map(latent, dtrg)
+            fakeimg = self.gen(img, style)
+
+            # train discriminator
+            with tf.GradientTape() as tape:
+                reald = self.dis(img, dtrg)
+                faked = self.dis(fakeimg, dtrg)
+                lossavd = self.binloss(reald, ones) + \
+                    self.binloss(faked, zeros)
+                d_loss = lossavd + r1_loss(self.dis, img, domain)
+            grad = tape.gradient(d_loss, self.dis.trainable_variables)
+            self.dopti.apply_gradients(zip(grad, self.dis.trainable_variables))
+
+            print(d_loss)  # tested this
+
+            # continue working on other loss
+
+
+z1 = tf.zeros([1, 256, 256, 3], dtype=tf.float32)
+z2 = tf.ones([1], dtype=tf.int32)
+
+var = tf.Variable(0)
+summarywriter = tf.summary.create_file_writer('abc')
+ckpt = tf.train.Checkpoint(step=var)
+
+ds = tf.data.Dataset.from_tensor_slices((z1, z2)).batch(1)
+
+print(ds)
+
+model = StarGanV2()
+model.train(ds, summarywriter, ckpt)

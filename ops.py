@@ -4,7 +4,6 @@ import numpy as np
 import tensorflow as tf
 
 
-
 def readdecode(filename, attr):
     raw = tf.io.read_file(filename)
 
@@ -14,7 +13,7 @@ def readdecode(filename, attr):
     image = tf.image.resize(image, (128, 128))
     image = image * 2 - 1
 
-    attr = [0.0, 1.0] if attr == b'1' else [1.0, 0.0]
+    attr = [0.0, 1.0] if attr == 1 else [1.0, 0.0]
 
     return image, attr
 
@@ -84,3 +83,13 @@ def create_dataset(dir):
     ds = ds.map(link2image)
 
     return ds
+
+
+def r1_loss(discriminator: tf.keras.Model, x_real, t_org):
+    with tf.GradientTape() as tape:
+        tape.watch(x_real)
+        loss = tf.reduce_mean(discriminator(x_real, t_org))
+    grad = tape.gradient(loss, x_real)
+    r1loss = tf.reduce_mean(tf.reduce_sum(tf.square(grad), [1, 2, 3]))
+
+    return 0.5 * r1loss
