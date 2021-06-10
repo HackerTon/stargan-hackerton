@@ -1,7 +1,6 @@
-import numpy as np
-from ops import create_dataset, create_dataset_celb, r1_loss
 import unittest
 
+import numpy as np
 import tensorflow as tf
 from tensorflow.python.keras.utils.version_utils import ModelVersionSelector
 from tensorflow.python.ops.functional_ops import Gradient
@@ -9,6 +8,7 @@ from tensorflow.python.ops.functional_ops import Gradient
 import model as mdl
 import model_v2
 import train
+from ops import create_dataset, create_dataset_celb, r1_loss
 
 
 class Outputtest(unittest.TestCase):
@@ -16,8 +16,7 @@ class Outputtest(unittest.TestCase):
         model = mdl.generator(2)
 
         sampleimg = tf.random.uniform([1, 128, 128, 3])
-        samplelabel = tf.random.uniform(
-            [1, 128, 128, 2], maxval=2, dtype=tf.int32)
+        samplelabel = tf.random.uniform([1, 128, 128, 2], maxval=2, dtype=tf.int32)
 
         output = model([sampleimg, samplelabel])
 
@@ -48,8 +47,7 @@ class Outputtest(unittest.TestCase):
         self.assertEqual(correct, tf.shape(styleencoder(sample, domain)))
 
     def testresblk(self):
-        resblock = model_v2.Resblk(
-            filters=256, downsample=True, normalize=True)
+        resblock = model_v2.Resblk(filters=256, downsample=True, normalize=True)
 
         shape = tf.TensorShape([1, 128, 128, 256])
         sample = tf.random.uniform([1, 256, 256, 3])
@@ -58,8 +56,7 @@ class Outputtest(unittest.TestCase):
         self.assertEqual(shape, tf.shape(output))
 
     def testadaresblk(self):
-        resblock = model_v2.Adaresblk(
-            filters=256, upsample=True, normalize=True)
+        resblock = model_v2.Adaresblk(filters=256, upsample=True, normalize=True)
 
         shape = tf.TensorShape([1, 256, 256, 256])
         sample = tf.random.uniform([1, 128, 128, 3])

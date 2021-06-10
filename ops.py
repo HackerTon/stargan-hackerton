@@ -31,14 +31,14 @@ def readdecode2(filename, attr):
 
 
 def textparser(text):
-    strings = tf.strings.split(text, ' ')
-    mask = tf.strings.regex_full_match(strings, '-?1')
+    strings = tf.strings.split(text, " ")
+    mask = tf.strings.regex_full_match(strings, "-?1")
     new_strings = tf.boolean_mask(strings, mask)
     link = strings[0]
     domain = tf.strings.to_number(new_strings)
     domain = domain * 0.5 + 0.5
-    domain = domain[-20]
 
+    # return link and attributes
     return link, domain
 
 
@@ -54,15 +54,15 @@ def label2onehot_C(label):
 
 
 def create_dataset_celb(dir):
-    filepath = os.path.join(dir, 'list_attr_celeba.txt')
-    imgdir = os.path.join(dir, 'img_align_celeba')
+    filepath = os.path.join(dir, "list_attr_celeba.txt")
+    imgdir = os.path.join(dir, "img_align_celeba")
 
     textfile = tf.data.TextLineDataset(filepath)
+    textfile.shuffle(len(textfile), tf.data.AUTOTUNE)
+    textfile = textfile.shuffle()
     textfile = textfile.map(textparser)
-
-    adddir = lambda x, y: (imgdir + '/' + x, y)
+    adddir = lambda x, y: (imgdir + "/" + x, y)
     link2image = lambda link, attr: readdecode(link, attr)
-
     ds = textfile.map(adddir)
     ds = ds.map(link2image)
 
@@ -70,13 +70,13 @@ def create_dataset_celb(dir):
 
 
 def create_dataset(dir):
-    filepath = os.path.join(dir, 'list_attr_celeba.txt')
-    imgdir = os.path.join(dir, 'img_align_celeba')
+    filepath = os.path.join(dir, "list_attr_celeba.txt")
+    imgdir = os.path.join(dir, "img_align_celeba")
 
     textfile = tf.data.TextLineDataset(filepath)
     textfile = textfile.map(textparser)
 
-    adddir = lambda x, y: (imgdir + '/' + x, y)
+    adddir = lambda x, y: (imgdir + "/" + x, y)
     link2image = lambda link, attr: readdecode2(link, attr)
 
     ds = textfile.map(adddir)

@@ -60,17 +60,15 @@ class Resblk(keras.layers.Layer):
             self.layers.append(InstanceNorm(affine=self.affine))
 
         self.layers.append(keras.layers.LeakyReLU(0.2))
-        self.layers.append(keras.layers.Conv2D(
-            self.nfilter, 3, padding='same'))
+        self.layers.append(keras.layers.Conv2D(self.nfilter, 3, padding="same"))
 
         if self.downsample:
             self.layers.append(keras.layers.AvgPool2D())
 
         if chandim != self.nfilter:
-            self.shortcut.append(keras.layers.Conv2D(
-                self.nfilter, 1, padding='valid'))
+            self.shortcut.append(keras.layers.Conv2D(self.nfilter, 1, padding="valid"))
         else:
-            self.shortcut.append(keras.layers.Activation('linear'))
+            self.shortcut.append(keras.layers.Activation("linear"))
 
         if self.downsample:
             self.shortcut.append(keras.layers.AvgPool2D())
@@ -89,7 +87,9 @@ class Resblk(keras.layers.Layer):
 
 
 class Adaresblk(Resblk):
-    def __init__(self, filters=128, upsample=False, normalize=False, affine=True, **kargs):
+    def __init__(
+        self, filters=128, upsample=False, normalize=False, affine=True, **kargs
+    ):
         super().__init__(filters, normalize=normalize, affine=affine, **kargs)
         self.upsample = upsample
 
@@ -100,8 +100,8 @@ class Adaresblk(Resblk):
             self.normalize1 = AdaptiveNorm()
             self.normalize2 = AdaptiveNorm()
         else:
-            self.normalize1 = keras.layers.Activation('linear')
-            self.normalize2 = keras.layers.Activation('linear')
+            self.normalize1 = keras.layers.Activation("linear")
+            self.normalize2 = keras.layers.Activation("linear")
 
         self.lrelu1 = keras.layers.LeakyReLU(0.2)
 
@@ -109,22 +109,19 @@ class Adaresblk(Resblk):
             self.upsample1 = keras.layers.UpSampling2D()
             self.upsample2 = keras.layers.UpSampling2D()
         else:
-            self.upsample1 = keras.layers.Activation('linear')
-            self.upsample2 = keras.layers.Activation('linear')
+            self.upsample1 = keras.layers.Activation("linear")
+            self.upsample2 = keras.layers.Activation("linear")
 
-        self.conv1 = keras.layers.Conv2D(
-            chandim, 3, padding='same')
+        self.conv1 = keras.layers.Conv2D(chandim, 3, padding="same")
 
         self.lrelu2 = keras.layers.LeakyReLU(0.2)
 
-        self.conv2 = keras.layers.Conv2D(
-            self.nfilter, 3, padding='same')
+        self.conv2 = keras.layers.Conv2D(self.nfilter, 3, padding="same")
 
         if chandim != self.nfilter:
-            self.shortcut = keras.layers.Conv2D(
-                self.nfilter, 1, padding='valid')
+            self.shortcut = keras.layers.Conv2D(self.nfilter, 1, padding="valid")
         else:
-            self.shortcut = keras.layers.Activation('linear')
+            self.shortcut = keras.layers.Activation("linear")
 
     def call(self, inputs):  # [images, style]
         outputs = self.normalize1(inputs)
@@ -186,14 +183,14 @@ class Mapping(keras.Model):
 def create_style_network() -> keras.Sequential:
     stylenet = keras.Sequential()
     stylenet.add(keras.layers.InputLayer([256, 256, 3]))
-    stylenet.add(keras.layers.Conv2D(64, 1, 1, 'same'))
+    stylenet.add(keras.layers.Conv2D(64, 1, 1, "same"))
     stylenet.add()
 
 
 def create_shared() -> keras.Sequential:
-    net = keras.Sequential(name='shared')
+    net = keras.Sequential(name="shared")
     net.add(keras.layers.InputLayer([256, 256, 3]))
-    net.add(keras.layers.Conv2D(64, 1, 1, padding='same'))
+    net.add(keras.layers.Conv2D(64, 1, 1, padding="same"))
     net.add(Resblk(128, True))
     net.add(Resblk(256, True))
 
@@ -264,7 +261,7 @@ class Generator(keras.Model):
         self.model = []
         self.model2 = []
 
-        self.model.append(keras.layers.Conv2D(64, 1, padding='same'))
+        self.model.append(keras.layers.Conv2D(64, 1, padding="same"))
 
         self.model.append(Resblk(128, True, True))
         self.model.append(Resblk(256, True, True))
@@ -280,7 +277,7 @@ class Generator(keras.Model):
         self.model2.append(Adaresblk(256, True, True))
         self.model2.append(Adaresblk(128, True, True))
         self.model2.append(Adaresblk(64, True, True))
-        self.convf = keras.layers.Conv2D(3, 1, padding='same')
+        self.convf = keras.layers.Conv2D(3, 1, padding="same")
 
     def call(self, inputs, head):  # inputs [images, style]
         outputs = inputs
@@ -308,14 +305,20 @@ class StarGanV2:
 
     # @tf.function
     # enable tf.function only after successful test
-    def train(self, dataset: tf.data.Dataset, summary: tf.summary.SummaryWriter, ckpt: tf.train.Checkpoint):
+    def train(
+        self,
+        dataset: tf.data.Dataset,
+        summary: tf.summary.SummaryWriter,
+        ckpt: tf.train.Checkpoint,
+    ):
         ckpt.step.assign_add(1)
 
         for img, domain in dataset:  # [bs, 256, 256, 3], [bs]
             bs = tf.shape(img)[0]
             latent = tf.random.normal([bs, 16])
             dtrg = tf.random.uniform(
-                [bs, 1], maxval=self.K, dtype=tf.int32)  # [bs, 1] rank2
+                [bs, 1], maxval=self.K, dtype=tf.int32
+            )  # [bs, 1] rank2
             ones = tf.ones_like([bs], dtype=tf.float32)
             zeros = tf.zeros_like([bs], dtype=tf.float32)
 
@@ -326,8 +329,7 @@ class StarGanV2:
             with tf.GradientTape() as tape:
                 reald = self.dis(img, dtrg)
                 faked = self.dis(fakeimg, dtrg)
-                lossavd = self.binloss(reald, ones) + \
-                    self.binloss(faked, zeros)
+                lossavd = self.binloss(reald, ones) + self.binloss(faked, zeros)
                 d_loss = lossavd + r1_loss(self.dis, img, domain)
             grad = tape.gradient(d_loss, self.dis.trainable_variables)
             self.dopti.apply_gradients(zip(grad, self.dis.trainable_variables))
@@ -337,16 +339,18 @@ class StarGanV2:
             # continue working on other loss
 
 
-z1 = tf.zeros([1, 256, 256, 3], dtype=tf.float32)
-z2 = tf.ones([1], dtype=tf.int32)
+# DEBUG
+# DEBUG
+# z1 = tf.zeros([1, 256, 256, 3], dtype=tf.float32)
+# z2 = tf.ones([1], dtype=tf.int32)
 
-var = tf.Variable(0)
-summarywriter = tf.summary.create_file_writer('abc')
-ckpt = tf.train.Checkpoint(step=var)
+# var = tf.Variable(0)
+# summarywriter = tf.summary.create_file_writer("abc")
+# ckpt = tf.train.Checkpoint(step=var)
 
-ds = tf.data.Dataset.from_tensor_slices((z1, z2)).batch(1)
+# ds = tf.data.Dataset.from_tensor_slices((z1, z2)).batch(1)
 
-print(ds)
+# print(ds)
 
-model = StarGanV2()
-model.train(ds, summarywriter, ckpt)
+# model = StarGanV2()
+# model.train(ds, summarywriter, ckpt)
